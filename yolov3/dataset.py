@@ -105,20 +105,20 @@ class Dataset(object):
             self.train_input_size = random.choice([self.train_input_sizes])
             self.train_output_sizes = self.train_input_size // self.strides
 
-            batch_image = np.zeros((self.batch_size, self.train_input_size, self.train_input_size, 3), dtype=np.float32)
+            batch_image = np.zeros((self.batch_size, self.train_input_size, self.train_input_size, 3), dtype="float32")
 
             if self.train_yolo_tiny:
-                batch_label_mbbox = np.zeros((self.batch_size, self.train_output_sizes[0], self.train_output_sizes[0], self.anchor_per_scale, 5 + self.num_classes), dtype=np.float32)
-                batch_label_lbbox = np.zeros((self.batch_size, self.train_output_sizes[1], self.train_output_sizes[1], self.anchor_per_scale, 5 + self.num_classes), dtype=np.float32)
+                batch_label_mbbox = np.zeros((self.batch_size, self.train_output_sizes[0], self.train_output_sizes[0], self.anchor_per_scale, 5 + self.num_classes), dtype="float32")
+                batch_label_lbbox = np.zeros((self.batch_size, self.train_output_sizes[1], self.train_output_sizes[1], self.anchor_per_scale, 5 + self.num_classes), dtype="float32")
             else:
-                batch_label_sbbox = np.zeros((self.batch_size, self.train_output_sizes[0], self.train_output_sizes[0], self.anchor_per_scale, 5 + self.num_classes), dtype=np.float32)
-                batch_label_mbbox = np.zeros((self.batch_size, self.train_output_sizes[1], self.train_output_sizes[1], self.anchor_per_scale, 5 + self.num_classes), dtype=np.float32)
-                batch_label_lbbox = np.zeros((self.batch_size, self.train_output_sizes[2], self.train_output_sizes[2], self.anchor_per_scale, 5 + self.num_classes), dtype=np.float32)
+                batch_label_sbbox = np.zeros((self.batch_size, self.train_output_sizes[0], self.train_output_sizes[0], self.anchor_per_scale, 5 + self.num_classes), dtype="float32")
+                batch_label_mbbox = np.zeros((self.batch_size, self.train_output_sizes[1], self.train_output_sizes[1], self.anchor_per_scale, 5 + self.num_classes), dtype="float32")
+                batch_label_lbbox = np.zeros((self.batch_size, self.train_output_sizes[2], self.train_output_sizes[2], self.anchor_per_scale, 5 + self.num_classes), dtype="float32")
 
-                batch_sbboxes = np.zeros((self.batch_size, self.max_bbox_per_scale, 4), dtype=np.float32)
+                batch_sbboxes = np.zeros((self.batch_size, self.max_bbox_per_scale, 4), dtype="float32")
 
-            batch_mbboxes = np.zeros((self.batch_size, self.max_bbox_per_scale, 4), dtype=np.float32)
-            batch_lbboxes = np.zeros((self.batch_size, self.max_bbox_per_scale, 4), dtype=np.float32)
+            batch_mbboxes = np.zeros((self.batch_size, self.max_bbox_per_scale, 4), dtype="float32")
+            batch_lbboxes = np.zeros((self.batch_size, self.max_bbox_per_scale, 4), dtype="float32")
 
             exceptions = False
             num = 0
@@ -251,7 +251,7 @@ class Dataset(object):
             bbox_coor = bbox[:4]
             bbox_class_ind = bbox[4]
 
-            onehot = np.zeros(self.num_classes, dtype=np.float)
+            onehot = np.zeros(self.num_classes, dtype=float)
             onehot[bbox_class_ind] = 1.0
             uniform_distribution = np.full(self.num_classes, 1.0 / self.num_classes)
             deta = 0.01

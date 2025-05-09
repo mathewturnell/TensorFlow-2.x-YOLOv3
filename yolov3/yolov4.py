@@ -10,6 +10,7 @@
 #================================================================
 import numpy as np
 import tensorflow as tf
+import tensorflow.keras.activations
 from tensorflow.keras.layers import Conv2D, Input, LeakyReLU, ZeroPadding2D, BatchNormalization, MaxPool2D
 from tensorflow.keras.regularizers import l2
 from yolov3.configs import *
@@ -31,9 +32,14 @@ class BatchNormalization(BatchNormalization):
     # stored moving `var` and `mean` in the "inference mode", and both `gama`
     # and `beta` will not be updated !
     def call(self, x, training=False):
-        if not training:
-            training = tf.constant(False)
-        training = tf.logical_and(training, self.trainable)
+        # if not training:
+        #     training = tf.constant(False)
+        # else:
+        #     training = tf.constant(True)
+        # training = tf.logical_and(training, self.trainable)
+
+        training = training and self.trainable
+
         return super().call(x, training)
 
 def convolutional(input_layer, filters_shape, downsample=False, activate=True, bn=True, activate_type='leaky'):
@@ -55,12 +61,12 @@ def convolutional(input_layer, filters_shape, downsample=False, activate=True, b
         if activate_type == "leaky":
             conv = LeakyReLU(alpha=0.1)(conv)
         elif activate_type == "mish":
-            conv = mish(conv)
+            conv = tf.keras.layers.Activation(tf.keras.activations.mish)(conv)
 
     return conv
 
 def mish(x):
-    return x * tf.math.tanh(tf.math.softplus(x))
+    return tf.keras.activations.mish(x)
 
 def residual_block(input_layer, input_channel, filter_num1, filter_num2, activate_type='leaky'):
     short_cut = input_layer
@@ -71,10 +77,11 @@ def residual_block(input_layer, input_channel, filter_num1, filter_num2, activat
     return residual_output
 
 def upsample(input_layer):
-    return tf.image.resize(input_layer, (input_layer.shape[1] * 2, input_layer.shape[2] * 2), method='nearest')
+    # return tf.image.resize(input_layer, (input_layer.shape[1] * 2, input_layer.shape[2] * 2), method='nearest')
+    return tf.keras.layers.UpSampling2D(size=(2, 2), data_format=None, interpolation="nearest")(input_layer)
 
 def route_group(input_layer, groups, group_id):
-    convs = tf.split(input_layer, num_or_size_splits=groups, axis=-1)
+    convs = tf.keras.ops.split(input_layer, groups, axis=-1)
     return convs[group_id]
 
 def darknet53(input_data):
@@ -119,7 +126,7 @@ def cspdarknet53(input_data):
         input_data = residual_block(input_data,  64,  32, 64, activate_type="mish")
     input_data = convolutional(input_data, (1, 1, 64, 64), activate_type="mish")
 
-    input_data = tf.concat([input_data, route], axis=-1)
+    input_data = tf.keras.layers.Concatenate()([input_data, route])
     input_data = convolutional(input_data, (1, 1, 128, 64), activate_type="mish")
     input_data = convolutional(input_data, (3, 3, 64, 128), downsample=True, activate_type="mish")
     route = input_data
@@ -128,7 +135,7 @@ def cspdarknet53(input_data):
     for i in range(2):
         input_data = residual_block(input_data, 64,  64, 64, activate_type="mish")
     input_data = convolutional(input_data, (1, 1, 64, 64), activate_type="mish")
-    input_data = tf.concat([input_data, route], axis=-1)
+    input_data = tf.keras.layers.Concatenate()([input_data, route])
 
     input_data = convolutional(input_data, (1, 1, 128, 128), activate_type="mish")
     input_data = convolutional(input_data, (3, 3, 128, 256), downsample=True, activate_type="mish")
@@ -138,7 +145,7 @@ def cspdarknet53(input_data):
     for i in range(8):
         input_data = residual_block(input_data, 128, 128, 128, activate_type="mish")
     input_data = convolutional(input_data, (1, 1, 128, 128), activate_type="mish")
-    input_data = tf.concat([input_data, route], axis=-1)
+    input_data = tf.keras.layers.Concatenate()([input_data, route])
 
     input_data = convolutional(input_data, (1, 1, 256, 256), activate_type="mish")
     route_1 = input_data
@@ -149,7 +156,7 @@ def cspdarknet53(input_data):
     for i in range(8):
         input_data = residual_block(input_data, 256, 256, 256, activate_type="mish")
     input_data = convolutional(input_data, (1, 1, 256, 256), activate_type="mish")
-    input_data = tf.concat([input_data, route], axis=-1)
+    input_data = tf.keras.layers.Concatenate()([input_data, route])
 
     input_data = convolutional(input_data, (1, 1, 512, 512), activate_type="mish")
     route_2 = input_data
@@ -160,17 +167,17 @@ def cspdarknet53(input_data):
     for i in range(4):
         input_data = residual_block(input_data, 512, 512, 512, activate_type="mish")
     input_data = convolutional(input_data, (1, 1, 512, 512), activate_type="mish")
-    input_data = tf.concat([input_data, route], axis=-1)
+    input_data = tf.keras.layers.Concatenate()([input_data, route])
 
     input_data = convolutional(input_data, (1, 1, 1024, 1024), activate_type="mish")
     input_data = convolutional(input_data, (1, 1, 1024, 512))
     input_data = convolutional(input_data, (3, 3, 512, 1024))
     input_data = convolutional(input_data, (1, 1, 1024, 512))
 
-    max_pooling_1 = tf.keras.layers.MaxPool2D(pool_size=13, padding='SAME', strides=1)(input_data)
-    max_pooling_2 = tf.keras.layers.MaxPool2D(pool_size=9, padding='SAME', strides=1)(input_data)
-    max_pooling_3 = tf.keras.layers.MaxPool2D(pool_size=5, padding='SAME', strides=1)(input_data)
-    input_data = tf.concat([max_pooling_1, max_pooling_2, max_pooling_3, input_data], axis=-1)
+    max_pooling_1 = tf.keras.layers.MaxPool2D(pool_size=13, padding='same', strides=1)(input_data)
+    max_pooling_2 = tf.keras.layers.MaxPool2D(pool_size=9, padding='same', strides=1)(input_data)
+    max_pooling_3 = tf.keras.layers.MaxPool2D(pool_size=5, padding='same', strides=1)(input_data)
+    input_data = tf.keras.layers.Concatenate()([max_pooling_1, max_pooling_2, max_pooling_3, input_data])
 
     input_data = convolutional(input_data, (1, 1, 2048, 512))
     input_data = convolutional(input_data, (3, 3, 512, 1024))
@@ -206,9 +213,9 @@ def cspdarknet53_tiny(input_data): # not sure how this should be called
     input_data = convolutional(input_data, (3, 3, 32, 32))
     route_1 = input_data
     input_data = convolutional(input_data, (3, 3, 32, 32))
-    input_data = tf.concat([input_data, route_1], axis=-1)
+    input_data = tf.keras.layers.Concatenate()([input_data, route_1])
     input_data = convolutional(input_data, (1, 1, 32, 64))
-    input_data = tf.concat([route, input_data], axis=-1)
+    input_data = tf.keras.layers.Concatenate()([route, input_data])
     input_data = MaxPool2D(2, 2, 'same')(input_data)
 
     input_data = convolutional(input_data, (3, 3, 64, 128))
@@ -217,9 +224,9 @@ def cspdarknet53_tiny(input_data): # not sure how this should be called
     input_data = convolutional(input_data, (3, 3, 64, 64))
     route_1 = input_data
     input_data = convolutional(input_data, (3, 3, 64, 64))
-    input_data = tf.concat([input_data, route_1], axis=-1)
+    input_data = tf.keras.layers.Concatenate()([input_data, route_1])
     input_data = convolutional(input_data, (1, 1, 64, 128))
-    input_data = tf.concat([route, input_data], axis=-1)
+    input_data = tf.keras.layers.Concatenate()([route, input_data])
     input_data = MaxPool2D(2, 2, 'same')(input_data)
 
     input_data = convolutional(input_data, (3, 3, 128, 256))
@@ -228,10 +235,10 @@ def cspdarknet53_tiny(input_data): # not sure how this should be called
     input_data = convolutional(input_data, (3, 3, 128, 128))
     route_1 = input_data
     input_data = convolutional(input_data, (3, 3, 128, 128))
-    input_data = tf.concat([input_data, route_1], axis=-1)
+    input_data = tf.keras.layers.Concatenate()([input_data, route_1])
     input_data = convolutional(input_data, (1, 1, 128, 256))
     route_1 = input_data
-    input_data = tf.concat([route, input_data], axis=-1)
+    input_data = tf.keras.layers.Concatenate()([route, input_data])
     input_data = MaxPool2D(2, 2, 'same')(input_data)
 
     input_data = convolutional(input_data, (3, 3, 512, 512))
@@ -257,7 +264,7 @@ def YOLOv3(input_layer, NUM_CLASS):
     # upsampling process does not need to learn, thereby reducing the network parameter  
     conv = upsample(conv)
 
-    conv = tf.concat([conv, route_2], axis=-1)
+    conv = tf.keras.layers.Concatenate()([conv, route_2])
     conv = convolutional(conv, (1, 1, 768, 256))
     conv = convolutional(conv, (3, 3, 256, 512))
     conv = convolutional(conv, (1, 1, 512, 256))
@@ -271,7 +278,7 @@ def YOLOv3(input_layer, NUM_CLASS):
     conv = convolutional(conv, (1, 1, 256, 128))
     conv = upsample(conv)
 
-    conv = tf.concat([conv, route_1], axis=-1)
+    conv = tf.keras.layers.Concatenate()([conv, route_1])
     conv = convolutional(conv, (1, 1, 384, 128))
     conv = convolutional(conv, (3, 3, 128, 256))
     conv = convolutional(conv, (1, 1, 256, 128))
@@ -291,7 +298,7 @@ def YOLOv4(input_layer, NUM_CLASS):
     conv = convolutional(conv, (1, 1, 512, 256))
     conv = upsample(conv)
     route_2 = convolutional(route_2, (1, 1, 512, 256))
-    conv = tf.concat([route_2, conv], axis=-1)
+    conv = tf.keras.layers.Concatenate()([route_2, conv])
 
     conv = convolutional(conv, (1, 1, 512, 256))
     conv = convolutional(conv, (3, 3, 256, 512))
@@ -303,7 +310,7 @@ def YOLOv4(input_layer, NUM_CLASS):
     conv = convolutional(conv, (1, 1, 256, 128))
     conv = upsample(conv)
     route_1 = convolutional(route_1, (1, 1, 256, 128))
-    conv = tf.concat([route_1, conv], axis=-1)
+    conv = tf.keras.layers.Concatenate()([route_1, conv])
 
     conv = convolutional(conv, (1, 1, 256, 128))
     conv = convolutional(conv, (3, 3, 128, 256))
@@ -316,7 +323,7 @@ def YOLOv4(input_layer, NUM_CLASS):
     conv_sbbox = convolutional(conv, (1, 1, 256, 3 * (NUM_CLASS + 5)), activate=False, bn=False)
 
     conv = convolutional(route_1, (3, 3, 128, 256), downsample=True)
-    conv = tf.concat([conv, route_2], axis=-1)
+    conv = tf.keras.layers.Concatenate()([conv, route_2])
 
     conv = convolutional(conv, (1, 1, 512, 256))
     conv = convolutional(conv, (3, 3, 256, 512))
@@ -329,7 +336,7 @@ def YOLOv4(input_layer, NUM_CLASS):
     conv_mbbox = convolutional(conv, (1, 1, 512, 3 * (NUM_CLASS + 5)), activate=False, bn=False)
 
     conv = convolutional(route_2, (3, 3, 256, 512), downsample=True)
-    conv = tf.concat([conv, route], axis=-1)
+    conv = tf.keras.layers.Concatenate()([conv, route])
 
     conv = convolutional(conv, (1, 1, 1024, 512))
     conv = convolutional(conv, (3, 3, 512, 1024))
@@ -357,7 +364,7 @@ def YOLOv3_tiny(input_layer, NUM_CLASS):
     # upsampling process does not need to learn, thereby reducing the network parameter  
     conv = upsample(conv)
     
-    conv = tf.concat([conv, route_1], axis=-1)
+    conv = tf.keras.layers.Concatenate()([conv, route_1])
     conv_mobj_branch = convolutional(conv, (3, 3, 128, 256))
     # conv_mbbox is used to predict medium size objects, shape = [None, 13, 13, 255]
     conv_mbbox = convolutional(conv_mobj_branch, (1, 1, 256, 3 * (NUM_CLASS + 5)), activate=False, bn=False)
@@ -374,7 +381,7 @@ def YOLOv4_tiny(input_layer, NUM_CLASS):
 
     conv = convolutional(conv, (1, 1, 256, 128))
     conv = upsample(conv)
-    conv = tf.concat([conv, route_1], axis=-1)
+    conv = tf.keras.layers.Concatenate()([conv, route_1])
 
     conv_mobj_branch = convolutional(conv, (3, 3, 128, 256))
     conv_mbbox = convolutional(conv_mobj_branch, (1, 1, 256, 3 * (NUM_CLASS + 5)), activate=False, bn=False)
@@ -383,7 +390,15 @@ def YOLOv4_tiny(input_layer, NUM_CLASS):
 
 def Create_Yolo(input_size=416, channels=3, training=False, CLASSES=YOLO_COCO_CLASSES):
     NUM_CLASS = len(read_class_names(CLASSES))
-    input_layer  = Input([input_size, input_size, channels])
+    
+    bs=1
+    if training:
+        bs=TRAIN_BATCH_SIZE
+    else:
+        bs=1
+
+
+    input_layer  = Input(shape=[input_size, input_size, channels], batch_size=bs)
 
     if TRAIN_YOLO_TINY:
         if YOLO_TYPE == "yolov4":
@@ -408,17 +423,19 @@ def Create_Yolo(input_size=416, channels=3, training=False, CLASSES=YOLO_COCO_CL
 
 def decode(conv_output, NUM_CLASS, i=0):
     # where i = 0, 1 or 2 to correspond to the three grid scales  
-    conv_shape       = tf.shape(conv_output)
+    conv_shape       = tf.keras.ops.shape(conv_output)
+    # conv_shape       = conv_output.shape[1:]
     batch_size       = conv_shape[0]
     output_size      = conv_shape[1]
 
-    conv_output = tf.reshape(conv_output, (batch_size, output_size, output_size, 3, 5 + NUM_CLASS))
+    conv_output = tf.keras.ops.reshape(conv_output, (batch_size, output_size, output_size, 3, 5 + NUM_CLASS))
 
-    #conv_raw_dxdy = conv_output[:, :, :, :, 0:2] # offset of center position     
-    #conv_raw_dwdh = conv_output[:, :, :, :, 2:4] # Prediction box length and width offset
-    #conv_raw_conf = conv_output[:, :, :, :, 4:5] # confidence of the prediction box
-    #conv_raw_prob = conv_output[:, :, :, :, 5: ] # category probability of the prediction box
-    conv_raw_dxdy, conv_raw_dwdh, conv_raw_conf, conv_raw_prob = tf.split(conv_output, (2, 2, 1, NUM_CLASS), axis=-1)
+    conv_raw_dxdy = conv_output[:, :, :, :, 0:2] # offset of center position     
+    conv_raw_dwdh = conv_output[:, :, :, :, 2:4] # Prediction box length and width offset
+    conv_raw_conf = conv_output[:, :, :, :, 4:5] # confidence of the prediction box
+    conv_raw_prob = conv_output[:, :, :, :, 5: ] # category probability of the prediction box
+    # conv_raw_dxdy, conv_raw_dwdh, conv_raw_conf, conv_raw_prob = tf.keras.ops.split(conv_output, (2, 2, 1, NUM_CLASS), axis=-1)
+    # conv_raw_dxdy, conv_raw_dwdh, conv_raw_conf, conv_raw_prob = tf.keras.ops.split(conv_output, (2, 2, 1, NUM_CLASS), axis=0)
 
     # next need Draw the grid. Where output_size is equal to 13, 26 or 52  
     #y = tf.range(output_size, dtype=tf.int32)
@@ -432,21 +449,21 @@ def decode(conv_output, NUM_CLASS, i=0):
     xy_grid = tf.tile(tf.expand_dims(xy_grid, axis=0), [batch_size, 1, 1, 3, 1])
     xy_grid = tf.cast(xy_grid, tf.float32)
     
-    #xy_grid = tf.concat([x[:, :, tf.newaxis], y[:, :, tf.newaxis]], axis=-1)
+    #xy_grid = tf.keras.layers.Concatenate()([x[:, :, tf.newaxis], y[:, :, tf.newaxis]], axis=-1)
     #xy_grid = tf.tile(xy_grid[tf.newaxis, :, :, tf.newaxis, :], [batch_size, 1, 1, 3, 1])
     #y_grid = tf.cast(xy_grid, tf.float32)
 
     # Calculate the center position of the prediction box:
-    pred_xy = (tf.sigmoid(conv_raw_dxdy) + xy_grid) * STRIDES[i]
+    pred_xy = (tf.keras.ops.sigmoid(conv_raw_dxdy) + xy_grid) * STRIDES[i]
     # Calculate the length and width of the prediction box:
-    pred_wh = (tf.exp(conv_raw_dwdh) * ANCHORS[i]) * STRIDES[i]
+    pred_wh = (tf.keras.ops.exp(conv_raw_dwdh) * ANCHORS[i]) * STRIDES[i]
 
-    pred_xywh = tf.concat([pred_xy, pred_wh], axis=-1)
-    pred_conf = tf.sigmoid(conv_raw_conf) # object box calculates the predicted confidence
-    pred_prob = tf.sigmoid(conv_raw_prob) # calculating the predicted probability category box object
+    pred_xywh = tf.keras.ops.concatenate([pred_xy, pred_wh], axis=-1)
+    pred_conf = tf.keras.ops.sigmoid(conv_raw_conf) # object box calculates the predicted confidence
+    pred_prob = tf.keras.ops.sigmoid(conv_raw_prob) # calculating the predicted probability category box object
 
     # calculating the predicted probability category box object
-    return tf.concat([pred_xywh, pred_conf, pred_prob], axis=-1)
+    return tf.keras.ops.concatenate([pred_xywh, pred_conf, pred_prob], axis=-1)
 
 
 def bbox_iou(boxes1, boxes2):
@@ -468,6 +485,10 @@ def bbox_iou(boxes1, boxes2):
     return 1.0 * inter_area / union_area
 
 def bbox_giou(boxes1, boxes2):
+
+    boxes1 = tf.cast(boxes1, dtype=tf.float64)
+    boxes2 = tf.cast(boxes2, dtype=tf.float64)
+
     boxes1 = tf.concat([boxes1[..., :2] - boxes1[..., 2:] * 0.5,
                         boxes1[..., :2] + boxes1[..., 2:] * 0.5], axis=-1)
     boxes2 = tf.concat([boxes2[..., :2] - boxes2[..., 2:] * 0.5,
@@ -525,7 +546,7 @@ def bbox_ciou(boxes1, boxes2):
     ar_gt = boxes2[..., 2] / boxes2[..., 3]
     ar_pred = boxes1[..., 2] / boxes1[..., 3]
 
-    ar_loss = 4 / (np.pi * np.pi) * (tf.atan(ar_gt) - tf.atan(ar_pred)) * (tf.atan(ar_gt) - tf.atan(ar_pred))
+    ar_loss = 4 / (np.pi * np.pi) * (tf.keras.ops.atan(ar_gt) - tf.keras.ops.atan(ar_pred)) * (tf.keras.ops.atan(ar_gt) - tf.keras.ops.atan(ar_pred))
     alpha = ar_loss / (1 - iou + ar_loss + 0.000001)
     ciou_term = d + alpha * ar_loss
 
@@ -534,11 +555,16 @@ def bbox_ciou(boxes1, boxes2):
 
 def compute_loss(pred, conv, label, bboxes, i=0, CLASSES=YOLO_COCO_CLASSES):
     NUM_CLASS = len(read_class_names(CLASSES))
-    conv_shape  = tf.shape(conv)
-    batch_size  = conv_shape[0]
+    conv_shape  = tf.keras.ops.shape(conv)
+    # batch_size  = conv_shape[0]
+    batch_size = TRAIN_BATCH_SIZE
     output_size = conv_shape[1]
     input_size  = STRIDES[i] * output_size
-    conv = tf.reshape(conv, (batch_size, output_size, output_size, 3, 5 + NUM_CLASS))
+    conv = tf.keras.ops.reshape(conv, (batch_size, output_size, output_size, 3, 5 + NUM_CLASS))
+
+    conv = tf.keras.ops.cast(conv, tf.float32)
+    pred = tf.keras.ops.cast(pred, tf.float32)
+    label = tf.keras.ops.cast(label, tf.float32)
 
     conv_raw_conf = conv[:, :, :, :, 4:5]
     conv_raw_prob = conv[:, :, :, :, 5:]
@@ -550,15 +576,16 @@ def compute_loss(pred, conv, label, bboxes, i=0, CLASSES=YOLO_COCO_CLASSES):
     respond_bbox  = label[:, :, :, :, 4:5]
     label_prob    = label[:, :, :, :, 5:]
 
-    giou = tf.expand_dims(bbox_giou(pred_xywh, label_xywh), axis=-1)
-    input_size = tf.cast(input_size, tf.float32)
+    giou = tf.keras.ops.expand_dims(bbox_giou(pred_xywh, label_xywh), axis=-1)
+    input_size = tf.keras.ops.cast(input_size, tf.float32)
+    giou = tf.keras.ops.cast(giou, tf.float32)
 
     bbox_loss_scale = 2.0 - 1.0 * label_xywh[:, :, :, :, 2:3] * label_xywh[:, :, :, :, 3:4] / (input_size ** 2)
     giou_loss = respond_bbox * bbox_loss_scale * (1 - giou)
 
     iou = bbox_iou(pred_xywh[:, :, :, :, np.newaxis, :], bboxes[:, np.newaxis, np.newaxis, np.newaxis, :, :])
     # Find the value of IoU with the real box The largest prediction box
-    max_iou = tf.expand_dims(tf.reduce_max(iou, axis=-1), axis=-1)
+    max_iou = tf.keras.ops.expand_dims(tf.reduce_max(iou, axis=-1), axis=-1)
 
     # If the largest iou is less than the threshold, it is considered that the prediction box contains no objects, then the background box
     respond_bgd = (1.0 - respond_bbox) * tf.cast( max_iou < YOLO_IOU_LOSS_THRESH, tf.float32 )
